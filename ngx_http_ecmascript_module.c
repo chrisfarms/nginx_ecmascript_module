@@ -1,7 +1,8 @@
 // 
 // module 
 
-#define XP_UNIX // required for spidermonkey
+#define XP_UNIX 				// required for spidermonkey
+// #define NGX_HTTP_HEADERS 1 		// enable nginx Accept header parsing
 
 #include <stdlib.h>
 #include <string.h>
@@ -372,15 +373,32 @@ static ngx_int_t ngx_http_ecmascript_handler(ngx_http_request_t *r){
 		ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "path def failed!");
 		return NGX_HTTP_INTERNAL_SERVER_ERROR;
 	}
-	// request prop
+	// querystring
+	if(!JS_DefineProperty(cx, request, "queryString", STRING_TO_JSVAL(JS_NewStringCopyN(cx, (char *) r->args.data, r->args.len)), NULL, NULL, JSPROP_ENUMERATE)){
+		ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "queryString def failed!");
+		return NGX_HTTP_INTERNAL_SERVER_ERROR;
+	}
+	// request method
 	if(!JS_DefineProperty(cx, request, "method", STRING_TO_JSVAL(JS_NewStringCopyN(cx, (char *) r->method_name.data, r->method_name.len)), NULL, NULL, JSPROP_ENUMERATE)){
 		ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "method def failed!");
 		return NGX_HTTP_INTERNAL_SERVER_ERROR;
 	}
+	// // accept header
+	// if(!JS_DefineProperty(cx, request, "accept", STRING_TO_JSVAL(JS_NewStringCopyN(cx, (char *) r->headers_in.accept->value.data, r->headers_in.accept->value.len)), NULL, NULL, JSPROP_ENUMERATE)){
+	// 	ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "accept def failed!");
+	// 	return NGX_HTTP_INTERNAL_SERVER_ERROR;
+	// }
 	// remote addr
 	if(!JS_DefineProperty(cx, request, "remoteAddress", STRING_TO_JSVAL(JS_NewStringCopyN(cx, (char *) r->connection->addr_text.data, r->connection->addr_text.len)), NULL, NULL, JSPROP_ENUMERATE)){
 		ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "remoteAddress def failed!");
 		return NGX_HTTP_INTERNAL_SERVER_ERROR;
+	}
+	// referer
+	if (r->headers_in.referer) {
+		if(!JS_DefineProperty(cx, request, "referer", STRING_TO_JSVAL(JS_NewStringCopyN(cx, (char *) r->headers_in.referer->value.data, r->headers_in.referer->value.len)), NULL, NULL, JSPROP_ENUMERATE)){
+			ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "referer def failed!");
+			return NGX_HTTP_INTERNAL_SERVER_ERROR;
+		}
 	}
 	// host
 	if(!JS_DefineProperty(cx, request, "host", STRING_TO_JSVAL(JS_NewStringCopyN(cx, (char *) r->headers_in.server.data, r->headers_in.server.len)), NULL, NULL, JSPROP_ENUMERATE)){
@@ -420,13 +438,14 @@ static ngx_int_t ngx_http_ecmascript_handler(ngx_http_request_t *r){
 	*
 	*/
 	JSScript *env;
-	char *handler_path = (char *)calloc(strlen((char *)path.data) + strlen((char *)ecma_loc_config->handler.data) + 1, sizeof(char));
-	strcat(handler_path, (char *)path.data);
+	char *handler_path = (char *)calloc(lenth_to_root_of_path + strlen((char *)ecma_loc_config->handler.data) + 2, sizeof(char));
+	strncat(handler_path, (char *)path.data, lenth_to_root_of_path);
+	strcat(handler_path, "/");
 	strcat(handler_path, (char *)ecma_loc_config->handler.data);
 	env = JS_CompileFile(cx, global, handler_path);
 	free(handler_path);
 	if(env == NULL){
-		ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Could not open env.js script");
+		ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Could not open handler script");
 		return NGX_HTTP_INTERNAL_SERVER_ERROR;		
 	}	
 	jsval result;	
@@ -473,7 +492,7 @@ ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "6");
 	out.buf = b;
 	out.next = NULL;
 	r->headers_out.content_length_n = b->last - b->pos;
-	// r->headers_out.status = JSVAL_TO_INT(status_val);
+	r->headers_out.status = JSVAL_TO_INT(status_val);
     b->last_buf = 1;
    /*
 	*
